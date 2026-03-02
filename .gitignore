@@ -12,6 +12,7 @@ __pycache__/
 .tsbuildinfo
 .pnpm-store
 .worktrees/
+tmp/
 .DS_Store
 **/.DS_Store
 ui/src/ui/__screenshots__/
@@ -93,3 +94,5 @@ package-lock.json
 
 # Local iOS signing overrides
 apps/ios/LocalSigning.xcconfig
+# Agus: ignore large files (>50MB)
+node_modules/.pnpm/@lancedb+lancedb-darwin-arm64@0.26.2/node_modules/@lancedb/lancedb-darwin-arm64/lancedb.darwin-arm64.node

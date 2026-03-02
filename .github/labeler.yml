@@ -93,6 +93,11 @@
   - changed-files:
       - any-glob-to-any-file:
           - "extensions/voice-call/**"
+"channel: wechat":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "extensions/wechat/**"
+          - "docs/channels/wechat.md"
 "channel: whatsapp-web":
   - changed-files:
       - any-glob-to-any-file:

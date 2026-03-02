@@ -4,6 +4,8 @@ import { hintForPath, humanize, schemaType, type JsonSchema } from "./config-for
 import { analyzeConfigSchema, renderConfigForm, SECTION_META } from "./config-form.ts";
 
 export type ConfigProps = {
+  /** Path to the config file being edited (e.g. ~/.openclaw/openclaw.json). Same file as CLI and Control UI. */
+  configFilePath?: string | null;
   raw: string;
   originalRaw: string;
   valid: boolean | null;
@@ -457,6 +459,15 @@ export function renderConfig(props: ConfigProps) {
             >${validity}</span
           >
         </div>
+        ${
+          props.configFilePath
+            ? html`
+                <div class="config-sidebar__path" title="Same file as openclaw config get/set and .openclaw/openclaw.json">
+                  ${props.configFilePath}
+                </div>
+              `
+            : nothing
+        }
 
         <!-- Search -->
         <div class="config-search">

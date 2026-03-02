@@ -996,6 +996,7 @@
                   "tools/slash-commands",
                   "tools/skills",
                   "tools/skills-config",
+                  "community/usecases",
                   "tools/clawhub",
                   "tools/plugin"
                 ]

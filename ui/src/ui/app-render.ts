@@ -886,6 +886,7 @@ export function renderApp(state: AppViewState) {
         ${
           state.tab === "config"
             ? renderConfig({
+                configFilePath: state.configSnapshot?.path ?? undefined,
                 raw: state.configRaw,
                 originalRaw: state.configRawOriginal,
                 valid: state.configValid,
