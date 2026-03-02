@@ -11,10 +11,13 @@ import {
   resolveSandboxConfigForAgent,
   resolveSandboxToolPolicyForAgent,
 } from "../agents/sandbox.js";
+import { SANDBOX_BROWSER_SECURITY_HASH_EPOCH } from "../agents/sandbox/constants.js";
+import { execDockerRaw, type ExecDockerRawResult } from "../agents/sandbox/docker.js";
 import type { SandboxToolPolicy } from "../agents/sandbox/types.js";
 import { loadWorkspaceSkillEntries } from "../agents/skills.js";
 import { resolveToolProfilePolicy } from "../agents/tool-policy.js";
 import { listAgentWorkspaceDirs } from "../agents/workspace-dirs.js";
+import { formatCliCommand } from "../cli/command-format.js";
 import { MANIFEST_KEY } from "../compat/legacy-names.js";
 import { resolveNativeSkillsEnabled } from "../config/commands.js";
 import type { OpenClawConfig, ConfigFileSnapshot } from "../config/config.js";
@@ -43,6 +46,13 @@ export type SecurityAuditFinding = {
   detail: string;
   remediation?: string;
 };
+
+type ExecDockerRawFn = (
+  args: string[],
+  opts?: { allowFailure?: boolean; input?: Buffer | string; signal?: AbortSignal },
+) => Promise<ExecDockerRawResult>;
+
+type CodeSafetySummaryCache = Map<string, Promise<unknown>>;
 
 // --------------------------------------------------------------------------
 // Helpers
@@ -238,9 +248,225 @@ async function readInstalledPackageVersion(dir: string): Promise<string | undefi
   }
 }
 
+function buildCodeSafetySummaryCacheKey(params: {
+  dirPath: string;
+  includeFiles?: string[];
+}): string {
+  const includeFiles = (params.includeFiles ?? []).map((entry) => entry.trim()).filter(Boolean);
+  const includeKey = includeFiles.length > 0 ? includeFiles.toSorted().join("\u0000") : "";
+  return `${params.dirPath}\u0000${includeKey}`;
+}
+
+async function getCodeSafetySummary(params: {
+  dirPath: string;
+  includeFiles?: string[];
+  summaryCache?: CodeSafetySummaryCache;
+}): Promise<Awaited<ReturnType<typeof skillScanner.scanDirectoryWithSummary>>> {
+  const cacheKey = buildCodeSafetySummaryCacheKey({
+    dirPath: params.dirPath,
+    includeFiles: params.includeFiles,
+  });
+  const cache = params.summaryCache;
+  if (cache) {
+    const hit = cache.get(cacheKey);
+    if (hit) {
+      return (await hit) as Awaited<ReturnType<typeof skillScanner.scanDirectoryWithSummary>>;
+    }
+    const pending = skillScanner.scanDirectoryWithSummary(params.dirPath, {
+      includeFiles: params.includeFiles,
+    });
+    cache.set(cacheKey, pending);
+    return await pending;
+  }
+  return await skillScanner.scanDirectoryWithSummary(params.dirPath, {
+    includeFiles: params.includeFiles,
+  });
+}
+
 // --------------------------------------------------------------------------
 // Exported collectors
 // --------------------------------------------------------------------------
+
+function normalizeDockerLabelValue(raw: string | undefined): string | null {
+  const trimmed = raw?.trim() ?? "";
+  if (!trimmed || trimmed === "<no value>") {
+    return null;
+  }
+  return trimmed;
+}
+
+async function listSandboxBrowserContainers(
+  execDockerRawFn: ExecDockerRawFn,
+): Promise<string[] | null> {
+  try {
+    const result = await execDockerRawFn(
+      ["ps", "-a", "--filter", "label=openclaw.sandboxBrowser=1", "--format", "{{.Names}}"],
+      { allowFailure: true },
+    );
+    if (result.code !== 0) {
+      return null;
+    }
+    return result.stdout
+      .toString("utf8")
+      .split(/\r?\n/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+async function readSandboxBrowserHashLabels(params: {
+  containerName: string;
+  execDockerRawFn: ExecDockerRawFn;
+}): Promise<{ configHash: string | null; epoch: string | null } | null> {
+  try {
+    const result = await params.execDockerRawFn(
+      [
+        "inspect",
+        "-f",
+        '{{ index .Config.Labels "openclaw.configHash" }}\t{{ index .Config.Labels "openclaw.browserConfigEpoch" }}',
+        params.containerName,
+      ],
+      { allowFailure: true },
+    );
+    if (result.code !== 0) {
+      return null;
+    }
+    const [hashRaw, epochRaw] = result.stdout.toString("utf8").split("\t");
+    return {
+      configHash: normalizeDockerLabelValue(hashRaw),
+      epoch: normalizeDockerLabelValue(epochRaw),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parsePublishedHostFromDockerPortLine(line: string): string | null {
+  const trimmed = line.trim();
+  const rhs = trimmed.includes("->") ? (trimmed.split("->").at(-1)?.trim() ?? "") : trimmed;
+  if (!rhs) {
+    return null;
+  }
+  const bracketHost = rhs.match(/^\[([^\]]+)\]:\d+$/);
+  if (bracketHost?.[1]) {
+    return bracketHost[1];
+  }
+  const hostPort = rhs.match(/^([^:]+):\d+$/);
+  if (hostPort?.[1]) {
+    return hostPort[1];
+  }
+  return null;
+}
+
+function isLoopbackPublishHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost";
+}
+
+async function readSandboxBrowserPortMappings(params: {
+  containerName: string;
+  execDockerRawFn: ExecDockerRawFn;
+}): Promise<string[] | null> {
+  try {
+    const result = await params.execDockerRawFn(["port", params.containerName], {
+      allowFailure: true,
+    });
+    if (result.code !== 0) {
+      return null;
+    }
+    return result.stdout
+      .toString("utf8")
+      .split(/\r?\n/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+export async function collectSandboxBrowserHashLabelFindings(params?: {
+  execDockerRawFn?: ExecDockerRawFn;
+}): Promise<SecurityAuditFinding[]> {
+  const findings: SecurityAuditFinding[] = [];
+  const execFn = params?.execDockerRawFn ?? execDockerRaw;
+  const containers = await listSandboxBrowserContainers(execFn);
+  if (!containers || containers.length === 0) {
+    return findings;
+  }
+
+  const missingHash: string[] = [];
+  const staleEpoch: string[] = [];
+  const nonLoopbackPublished: string[] = [];
+
+  for (const containerName of containers) {
+    const labels = await readSandboxBrowserHashLabels({ containerName, execDockerRawFn: execFn });
+    if (!labels) {
+      continue;
+    }
+    if (!labels.configHash) {
+      missingHash.push(containerName);
+    }
+    if (labels.epoch !== SANDBOX_BROWSER_SECURITY_HASH_EPOCH) {
+      staleEpoch.push(containerName);
+    }
+    const portMappings = await readSandboxBrowserPortMappings({
+      containerName,
+      execDockerRawFn: execFn,
+    });
+    if (!portMappings?.length) {
+      continue;
+    }
+    const exposedMappings = portMappings.filter((line) => {
+      const host = parsePublishedHostFromDockerPortLine(line);
+      return Boolean(host && !isLoopbackPublishHost(host));
+    });
+    if (exposedMappings.length > 0) {
+      nonLoopbackPublished.push(`${containerName} (${exposedMappings.join("; ")})`);
+    }
+  }
+
+  if (missingHash.length > 0) {
+    findings.push({
+      checkId: "sandbox.browser_container.hash_label_missing",
+      severity: "warn",
+      title: "Sandbox browser container missing config hash label",
+      detail:
+        `Containers: ${missingHash.join(", ")}. ` +
+        "These browser containers predate hash-based drift checks and may miss security remediations until recreated.",
+      remediation: `${formatCliCommand("openclaw sandbox recreate --browser --all")} (add --force to skip prompt).`,
+    });
+  }
+
+  if (staleEpoch.length > 0) {
+    findings.push({
+      checkId: "sandbox.browser_container.hash_epoch_stale",
+      severity: "warn",
+      title: "Sandbox browser container hash epoch is stale",
+      detail:
+        `Containers: ${staleEpoch.join(", ")}. ` +
+        `Expected openclaw.browserConfigEpoch=${SANDBOX_BROWSER_SECURITY_HASH_EPOCH}.`,
+      remediation: `${formatCliCommand("openclaw sandbox recreate --browser --all")} (add --force to skip prompt).`,
+    });
+  }
+
+  if (nonLoopbackPublished.length > 0) {
+    findings.push({
+      checkId: "sandbox.browser_container.non_loopback_publish",
+      severity: "critical",
+      title: "Sandbox browser container publishes ports on non-loopback interfaces",
+      detail:
+        `Containers: ${nonLoopbackPublished.join(", ")}. ` +
+        "Sandbox browser observer/control ports should stay loopback-only to avoid unintended remote access.",
+      remediation:
+        `${formatCliCommand("openclaw sandbox recreate --browser --all")} (add --force to skip prompt), ` +
+        "then verify published ports are bound to 127.0.0.1.",
+    });
+  }
+
+  return findings;
+}
 
 export async function collectPluginsTrustFindings(params: {
   cfg: OpenClawConfig;
@@ -776,6 +1002,7 @@ export async function readConfigSnapshotForAudit(params: {
 
 export async function collectPluginsCodeSafetyFindings(params: {
   stateDir: string;
+  summaryCache?: CodeSafetySummaryCache;
 }): Promise<SecurityAuditFinding[]> {
   const findings: SecurityAuditFinding[] = [];
   const { extensionsDir, pluginDirs } = await listInstalledPluginDirs({
@@ -827,21 +1054,21 @@ export async function collectPluginsCodeSafetyFindings(params: {
       });
     }
 
-    const summary = await skillScanner
-      .scanDirectoryWithSummary(pluginPath, {
-        includeFiles: forcedScanEntries,
-      })
-      .catch((err) => {
-        findings.push({
-          checkId: "plugins.code_safety.scan_failed",
-          severity: "warn",
-          title: `Plugin "${pluginName}" code scan failed`,
-          detail: `Static code scan could not complete: ${String(err)}`,
-          remediation:
-            "Check file permissions and plugin layout, then rerun `openclaw security audit --deep`.",
-        });
-        return null;
+    const summary = await getCodeSafetySummary({
+      dirPath: pluginPath,
+      includeFiles: forcedScanEntries,
+      summaryCache: params.summaryCache,
+    }).catch((err) => {
+      findings.push({
+        checkId: "plugins.code_safety.scan_failed",
+        severity: "warn",
+        title: `Plugin "${pluginName}" code scan failed`,
+        detail: `Static code scan could not complete: ${String(err)}`,
+        remediation:
+          "Check file permissions and plugin layout, then rerun `openclaw security audit --deep`.",
       });
+      return null;
+    });
     if (!summary) {
       continue;
     }
@@ -878,6 +1105,7 @@ export async function collectPluginsCodeSafetyFindings(params: {
 export async function collectInstalledSkillsCodeSafetyFindings(params: {
   cfg: OpenClawConfig;
   stateDir: string;
+  summaryCache?: CodeSafetySummaryCache;
 }): Promise<SecurityAuditFinding[]> {
   const findings: SecurityAuditFinding[] = [];
   const pluginExtensionsDir = path.join(params.stateDir, "extensions");
@@ -902,7 +1130,10 @@ export async function collectInstalledSkillsCodeSafetyFindings(params: {
       scannedSkillDirs.add(skillDir);
 
       const skillName = entry.skill.name;
-      const summary = await skillScanner.scanDirectoryWithSummary(skillDir).catch((err) => {
+      const summary = await getCodeSafetySummary({
+        dirPath: skillDir,
+        summaryCache: params.summaryCache,
+      }).catch((err) => {
         findings.push({
           checkId: "skills.code_safety.scan_failed",
           severity: "warn",

@@ -18,6 +18,11 @@ tmp/
 ui/src/ui/__screenshots__/
 ui/playwright-report/
 ui/test-results/
+packages/dashboard-next/.next/
+packages/dashboard-next/out/
+
+# Mise configuration files
+mise.toml
 
 # Android build artifacts
 apps/android/.gradle/
@@ -90,9 +95,31 @@ USER.md
 !.agent/workflows/
 /local/
 package-lock.json
-.claude/settings.local.json
+.claude/
+.agents/
+.agents
+.agent/
+skills-lock.json
 
 # Local iOS signing overrides
 apps/ios/LocalSigning.xcconfig
 # Agus: ignore large files (>50MB)
 node_modules/.pnpm/@lancedb+lancedb-darwin-arm64@0.26.2/node_modules/@lancedb/lancedb-darwin-arm64/lancedb.darwin-arm64.node
+
+# Xcode build directories (xcodebuild output)
+apps/ios/build/
+apps/shared/OpenClawKit/build/
+Swabble/build/
+
+# Generated protocol schema (produced via pnpm protocol:gen)
+dist/protocol.schema.json
+.ant-colony/
+
+# Eclipse
+**/.project
+**/.classpath
+**/.settings/
+**/.gradle/
+
+# Synthing
+**/.stfolder/
