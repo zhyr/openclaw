@@ -13,6 +13,9 @@ __pycache__/
 .pnpm-store
 .worktrees/
 tmp/
+.tmp-lanshu-waytovideo/
+.tmp-libsignal/
+.tmp-awesome-usecases/
 .DS_Store
 **/.DS_Store
 ui/src/ui/__screenshots__/
@@ -91,6 +94,7 @@ USER.md
 
 # Agent credentials and memory (NEVER COMMIT)
 /memory/
+.openclaw/
 .agent/*.json
 !.agent/workflows/
 /local/

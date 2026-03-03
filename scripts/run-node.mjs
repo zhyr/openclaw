@@ -130,6 +130,10 @@ const shouldBuild = (deps) => {
   if (deps.env.OPENCLAW_FORCE_BUILD === "1") {
     return true;
   }
+  // Skip rebuild when dist/entry.js exists (e.g. after manual tsdown or dirty tree blocks auto-build).
+  if (deps.env.OPENCLAW_SKIP_BUILD === "1" && statMtime(deps.distEntry, deps.fs) != null) {
+    return false;
+  }
   const stamp = readBuildStamp(deps);
   if (stamp.mtime == null) {
     return true;
@@ -176,7 +180,10 @@ const logRunner = (message, deps) => {
 };
 
 const runOpenClaw = async (deps) => {
-  const nodeProcess = deps.spawn(deps.execPath, ["openclaw.mjs", ...deps.args], {
+  // Run dist/entry.js as main module so Node resolves node_modules from repo root.
+  // Using openclaw.mjs + dynamic import(entry) can fail with ERR_MODULE_NOT_FOUND for deps (e.g. chalk).
+  const script = deps.fs.existsSync(deps.distEntry) ? "dist/entry.js" : "openclaw.mjs";
+  const nodeProcess = deps.spawn(deps.execPath, [script, ...deps.args], {
     cwd: deps.cwd,
     env: deps.env,
     stdio: "inherit",
@@ -220,7 +227,7 @@ export async function runNodeMain(params = {}) {
   };
 
   deps.distRoot = path.join(deps.cwd, "dist");
-  deps.distEntry = path.join(deps.distRoot, "/entry.js");
+  deps.distEntry = path.join(deps.distRoot, "entry.js");
   deps.buildStampPath = path.join(deps.distRoot, ".buildstamp");
   deps.srcRoot = path.join(deps.cwd, "src");
   deps.configFiles = [path.join(deps.cwd, "tsconfig.json"), path.join(deps.cwd, "package.json")];
@@ -252,6 +259,13 @@ export async function runNodeMain(params = {}) {
   }
   if (buildRes.exitCode !== 0 && buildRes.exitCode !== null) {
     return buildRes.exitCode;
+  }
+  if (deps.fs.existsSync(deps.distEntry) === false) {
+    logRunner(
+      "Build completed but dist/entry.js is missing. Run: pnpm exec tsdown --no-clean",
+      deps,
+    );
+    return 1;
   }
   writeBuildStamp(deps);
   return await runOpenClaw(deps);
