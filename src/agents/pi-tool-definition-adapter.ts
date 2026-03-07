@@ -208,7 +208,22 @@ export function toToolDefinitions(tools: AnyAgentTool[]): ToolDefinition[] {
           if (described.stack && described.stack !== described.message) {
             logDebug(`tools: ${normalizedName} failed stack:\n${described.stack}`);
           }
-          logError(`[tools] ${normalizedName} failed: ${described.message}`);
+          // ENOENT on optional workspace files (memory/*, HEARTBEAT.md, MEMORY.md) is expected; log at debug to avoid noise.
+          const isReadEnoent =
+            normalizedName === "read" &&
+            (described.message.includes("ENOENT") ||
+              (err && typeof err === "object" && (err as NodeJS.ErrnoException).code === "ENOENT"));
+          const isOptionalPath =
+            described.message.includes("memory/") ||
+            described.message.includes("HEARTBEAT.md") ||
+            described.message.includes("MEMORY.md");
+          if (isReadEnoent && isOptionalPath) {
+            logDebug(
+              `[tools] ${normalizedName} failed (optional file missing): ${described.message}`,
+            );
+          } else {
+            logError(`[tools] ${normalizedName} failed: ${described.message}`);
+          }
 
           const errorResult = jsonResult({
             status: "error",

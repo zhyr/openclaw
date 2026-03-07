@@ -12,7 +12,17 @@ afterEach(() => {
 
 describe("resolveOllamaApiBase", () => {
   it("returns default localhost base when no configured URL is provided", () => {
+    vi.stubEnv("OLLAMA_HOST", undefined);
     expect(resolveOllamaApiBase()).toBe("http://127.0.0.1:11434");
+  });
+
+  it("uses OLLAMA_HOST when set and no configured URL", () => {
+    vi.stubEnv("OLLAMA_HOST", "127.0.0.1:11434");
+    expect(resolveOllamaApiBase()).toBe("http://127.0.0.1:11434");
+    vi.stubEnv("OLLAMA_HOST", "http://192.168.1.10:11434");
+    expect(resolveOllamaApiBase()).toBe("http://192.168.1.10:11434");
+    vi.stubEnv("OLLAMA_HOST", "192.168.1.10:11434/v1");
+    expect(resolveOllamaApiBase()).toBe("http://192.168.1.10:11434");
   });
 
   it("strips /v1 suffix from OpenAI-compatible URLs", () => {

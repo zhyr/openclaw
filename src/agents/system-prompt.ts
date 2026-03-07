@@ -231,6 +231,8 @@ export function buildAgentSystemPrompt(params: {
     channel: string;
   };
   memoryCitationsMode?: MemoryCitationsMode;
+  /** Optional reply language (e.g. zh-Hans); when set, instructs the model to prefer that language. */
+  replyLanguage?: string;
 }) {
   const acpEnabled = params.acpEnabled !== false;
   const coreToolSummaries: Record<string, string> = {
@@ -414,9 +416,23 @@ export function buildAgentSystemPrompt(params: {
     return "You are a personal assistant running inside OpenClaw.";
   }
 
+  const replyLanguageLine =
+    typeof params.replyLanguage === "string" && params.replyLanguage.trim().length > 0
+      ? (() => {
+          const lang = params.replyLanguage.trim().toLowerCase();
+          if (lang === "zh-hans" || lang === "zh-cn" || lang === "zh_cn") {
+            return "Always reply in 简体中文 unless the user writes in another language.";
+          }
+          if (lang === "zh-hant" || lang === "zh-tw" || lang === "zh_tw") {
+            return "Always reply in 繁體中文 unless the user writes in another language.";
+          }
+          return `Prefer replying in ${params.replyLanguage.trim()} when the user's language is unclear.`;
+        })()
+      : "";
+
   const lines = [
     "You are a personal assistant running inside OpenClaw.",
-    "",
+    ...(replyLanguageLine ? ["", replyLanguageLine, ""] : []),
     "## Tooling",
     "Tool availability (filtered by policy):",
     "Tool names are case-sensitive. Call tools exactly as listed.",

@@ -145,6 +145,11 @@ export type AgentDefaultsConfig = {
   /** Time format in system prompt: auto (OS preference), 12-hour, or 24-hour. */
   timeFormat?: "auto" | "12" | "24";
   /**
+   * Optional reply language hint for the model (e.g. zh-Hans for 简体中文).
+   * When set, the system prompt instructs the model to prefer that language for replies.
+   */
+  replyLanguage?: string;
+  /**
    * Envelope timestamp timezone: "utc" (default), "local", "user", or an IANA timezone string.
    */
   envelopeTimezone?: string;

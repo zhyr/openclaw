@@ -222,15 +222,22 @@ type VllmModelsResponse = {
 };
 
 /**
- * Derive the Ollama native API base URL from a configured base URL.
+ * Derive the Ollama native API base URL from a configured base URL or OLLAMA_HOST.
  *
- * Users typically configure `baseUrl` with a `/v1` suffix (e.g.
- * `http://192.168.20.14:11434/v1`) for the OpenAI-compatible endpoint.
- * The native Ollama API lives at the root (e.g. `/api/tags`), so we
- * strip the `/v1` suffix when present.
+ * When no config is given, respects OLLAMA_HOST (e.g. "127.0.0.1:11434" or
+ * "http://127.0.0.1:11434") so discovery matches the same host/port as `ollama serve`.
+ * Users may configure `baseUrl` with a `/v1` suffix for the OpenAI-compatible endpoint;
+ * the native API lives at the root (e.g. `/api/tags`), so we strip the `/v1` suffix.
  */
 export function resolveOllamaApiBase(configuredBaseUrl?: string): string {
-  if (!configuredBaseUrl) {
+  if (!configuredBaseUrl?.trim()) {
+    const host = process.env.OLLAMA_HOST?.trim();
+    if (host) {
+      const withScheme =
+        host.startsWith("http://") || host.startsWith("https://") ? host : `http://${host}`;
+      const trimmed = withScheme.replace(/\/+$/, "");
+      return trimmed.replace(/\/v1$/i, "");
+    }
     return OLLAMA_API_BASE_URL;
   }
   // Strip trailing slash, then strip /v1 suffix if present

@@ -118,6 +118,7 @@ function createChatContext(): Pick<
   | "chatDeltaSentAt"
   | "chatAbortedRuns"
   | "removeChatRun"
+  | "addChatRun"
   | "dedupe"
   | "registerToolEventRecipient"
   | "logGateway"
@@ -131,6 +132,7 @@ function createChatContext(): Pick<
     chatDeltaSentAt: new Map(),
     chatAbortedRuns: new Map(),
     removeChatRun: vi.fn(),
+    addChatRun: vi.fn(),
     dedupe: new Map(),
     registerToolEventRecipient: vi.fn(),
     logGateway: {

@@ -89,9 +89,11 @@ export function resolveAssistantIdentity(params: {
   const agentIdentity = resolveAgentIdentity(params.cfg, agentId);
   const fileIdentity = workspaceDir ? loadAgentIdentity(workspaceDir) : null;
 
+  // Prefer agent identity name (Raw: agents.list[].identity.name) over legacy ui.assistant so
+  // the name defined in config is shown in chat.
   const name =
-    coerceIdentityValue(configAssistant?.name, MAX_ASSISTANT_NAME) ??
     coerceIdentityValue(agentIdentity?.name, MAX_ASSISTANT_NAME) ??
+    coerceIdentityValue(configAssistant?.name, MAX_ASSISTANT_NAME) ??
     coerceIdentityValue(fileIdentity?.name, MAX_ASSISTANT_NAME) ??
     DEFAULT_ASSISTANT_IDENTITY.name;
 

@@ -505,6 +505,31 @@ describe("buildAgentSystemPrompt", () => {
     );
   });
 
+  it("injects reply language instruction when replyLanguage is zh-Hans", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      replyLanguage: "zh-Hans",
+    });
+    expect(prompt).toContain(
+      "Always reply in 简体中文 unless the user writes in another language.",
+    );
+  });
+
+  it("injects reply language instruction when replyLanguage is zh-CN", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      replyLanguage: "zh-CN",
+    });
+    expect(prompt).toContain(
+      "Always reply in 简体中文 unless the user writes in another language.",
+    );
+  });
+
+  it("omits reply language when replyLanguage is not set", () => {
+    const prompt = buildAgentSystemPrompt({ workspaceDir: "/tmp/openclaw" });
+    expect(prompt).not.toContain("Always reply in 简体中文");
+  });
+
   it("summarizes the message tool when available", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",

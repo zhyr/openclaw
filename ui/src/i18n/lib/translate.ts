@@ -4,7 +4,6 @@ import {
   SUPPORTED_LOCALES,
   isSupportedLocale,
   loadLazyLocaleTranslation,
-  resolveNavigatorLocale,
 } from "./registry.ts";
 import type { Locale, TranslationMap } from "./types.ts";
 
@@ -26,7 +25,8 @@ class I18nManager {
     if (isSupportedLocale(saved)) {
       return saved;
     }
-    return resolveNavigatorLocale(navigator.language);
+    // Default to zh-CN when no saved preference (e.g. dev dashboard).
+    return "zh-CN";
   }
 
   private loadLocale() {

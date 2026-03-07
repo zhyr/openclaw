@@ -34,3 +34,23 @@ export function formatLocalIsoWithOffset(now: Date, timeZone?: string): string {
 
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}.${parts.fractionalSecond}${offset}`;
 }
+
+/** Local HH:mm:ss in the same timezone as formatLocalIsoWithOffset (env TZ or system). */
+export function formatLocalTimeOnly(now: Date, timeZone?: string): string {
+  const explicit = timeZone ?? process.env.TZ;
+  const tz =
+    explicit && isValidTimeZone(explicit)
+      ? explicit
+      : Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  const fmt = new Intl.DateTimeFormat("en", {
+    timeZone: tz,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  const parts = Object.fromEntries(fmt.formatToParts(now).map((p) => [p.type, p.value]));
+  return `${parts.hour}:${parts.minute}:${parts.second}`;
+}
