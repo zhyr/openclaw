@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 
 echo "==> 1. 安装依赖（若无 node_modules 或需更新）"
 bash scripts/setup-libsignal.sh
-pnpm install --no-optional || pnpm install
+pnpm install
 
 echo "==> 2. 编译主项目"
 pnpm build
