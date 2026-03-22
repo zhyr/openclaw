@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
@@ -39,6 +40,8 @@ export const DEFAULT_SKILLS_WATCH_IGNORED: RegExp[] = [
   // Build artifacts and caches
   /(^|[\\/])build([\\/]|$)/,
   /(^|[\\/])\.cache([\\/]|$)/,
+  // OrbStack (Docker/VM) can cause ETIMEDOUT when watcher traverses home dir
+  /(^|[\\/])OrbStack([\\/]|$)/,
 ];
 
 function bumpVersion(current: number): number {
@@ -93,6 +96,39 @@ function resolveWatchTargets(workspaceDir: string, config?: OpenClawConfig): str
     targets.add(`${globRoot}/*/SKILL.md`);
   }
   return Array.from(targets).toSorted();
+}
+
+/** Path segment that often causes ETIMEDOUT when watched (e.g. OrbStack in home). */
+const ORBSTACK_PATH_SEGMENT = "OrbStack";
+
+/** Returns the directory root of a watch target (e.g. ".../skills" from a glob like .../skills/star/SKILL.md). */
+function watchTargetGlobRoot(target: string): string {
+  return target.replace(/\/\*\/SKILL\.md$/, "").replace(/\/SKILL\.md$/, "");
+}
+
+/**
+ * Drops targets that would cause the watcher to touch OrbStack or to watch
+ * non-existent directories (which can make chokidar watch an ancestor like home
+ * and then lstat everything under it, including OrbStack, leading to ETIMEDOUT).
+ */
+function filterTargetsAwayFromOrbStack(targets: string[]): string[] {
+  const filtered: string[] = [];
+  for (const t of targets) {
+    const root = watchTargetGlobRoot(t);
+    if (!fs.existsSync(root)) {
+      continue;
+    }
+    try {
+      const resolved = fs.realpathSync.native(root);
+      if (resolved.includes(ORBSTACK_PATH_SEGMENT)) {
+        continue;
+      }
+    } catch {
+      continue;
+    }
+    filtered.push(t);
+  }
+  return filtered;
 }
 
 export function registerSkillsChangeListener(listener: (event: SkillsChangeEvent) => void) {
@@ -154,6 +190,7 @@ export function ensureSkillsWatcher(params: { workspaceDir: string; config?: Ope
   }
 
   const watchTargets = resolveWatchTargets(workspaceDir, params.config);
+  const targetsToWatch = filterTargetsAwayFromOrbStack(watchTargets);
   const pathsKey = watchTargets.join("|");
   if (existing && existing.pathsKey === pathsKey && existing.debounceMs === debounceMs) {
     return;
@@ -166,14 +203,16 @@ export function ensureSkillsWatcher(params: { workspaceDir: string; config?: Ope
     void existing.watcher.close().catch(() => {});
   }
 
-  const watcher = chokidar.watch(watchTargets, {
+  const watcher = chokidar.watch(targetsToWatch, {
     ignoreInitial: true,
+    // Do not follow symlinks; avoids ETIMEDOUT when a watch root (e.g. workspace-dev)
+    // is a symlink into slow/remote trees like OrbStack.
+    followSymlinks: false,
     awaitWriteFinish: {
       stabilityThreshold: debounceMs,
       pollInterval: 100,
     },
     // Avoid FD exhaustion on macOS when a workspace contains huge trees.
-    // This watcher only needs to react to SKILL.md changes.
     ignored: DEFAULT_SKILLS_WATCH_IGNORED,
   });
 

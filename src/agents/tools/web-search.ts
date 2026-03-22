@@ -711,15 +711,25 @@ function resolveSearchCount(value: unknown, fallback: number): number {
   return clamped;
 }
 
+/** Brave Search API accepts zh-hans/zh-hant but not "zh"; map generic Chinese to simplified. */
+const BRAVE_ZH_SEARCH_LANG = "zh-hans";
+
 function normalizeBraveSearchLang(value: string | undefined): string | undefined {
   if (!value) {
     return undefined;
   }
-  const trimmed = value.trim();
-  if (!trimmed || !BRAVE_SEARCH_LANG_CODE.test(trimmed)) {
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) {
     return undefined;
   }
-  return trimmed.toLowerCase();
+  // Brave API rejects "zh"; only zh-hans and zh-hant are valid.
+  if (trimmed === "zh") {
+    return BRAVE_ZH_SEARCH_LANG;
+  }
+  if (!BRAVE_SEARCH_LANG_CODE.test(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
 }
 
 function normalizeBraveUiLang(value: string | undefined): string | undefined {

@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -13,8 +14,27 @@ vi.mock("chokidar", () => {
   };
 });
 
+// filterTargetsAwayFromOrbStack skips non-existent roots; test env often has no real dirs.
+// Create the minimal dirs so chokidar receives the expected targets.
+function ensureSkillRootsExist(workspaceDir: string) {
+  const roots = [
+    path.join(workspaceDir, "skills"),
+    path.join(workspaceDir, ".agents", "skills"),
+    path.join(os.homedir(), ".agents", "skills"),
+  ];
+  for (const dir of roots) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+    } catch {
+      // ignore
+    }
+  }
+}
+
 describe("ensureSkillsWatcher", () => {
   it("ignores node_modules, dist, .git, and Python venvs by default", async () => {
+    ensureSkillRootsExist("/tmp/workspace");
+
     const mod = await import("./refresh.js");
     mod.ensureSkillsWatcher({ workspaceDir: "/tmp/workspace" });
 
@@ -37,7 +57,7 @@ describe("ensureSkillsWatcher", () => {
         posix(path.join(os.homedir(), ".agents", "skills", "*", "SKILL.md")),
       ]),
     );
-    expect(targets.every((target) => target.includes("SKILL.md"))).toBe(true);
+    expect(targets.every((t) => t.includes("SKILL.md"))).toBe(true);
     const ignored = mod.DEFAULT_SKILLS_WATCH_IGNORED;
 
     // Node/JS paths

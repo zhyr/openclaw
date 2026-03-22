@@ -421,10 +421,14 @@ export function buildAgentSystemPrompt(params: {
       ? (() => {
           const lang = params.replyLanguage.trim().toLowerCase();
           if (lang === "zh-hans" || lang === "zh-cn" || lang === "zh_cn") {
-            return "Always reply in 简体中文 unless the user writes in another language.";
+            return [
+              "Reply in 简体中文 by default. Use the user's language only when they explicitly ask for answers in that language; otherwise keep your response in 简体中文.",
+            ].join(" ");
           }
           if (lang === "zh-hant" || lang === "zh-tw" || lang === "zh_tw") {
-            return "Always reply in 繁體中文 unless the user writes in another language.";
+            return [
+              "Reply in 繁體中文 by default. Use the user's language only when they explicitly ask for answers in that language; otherwise keep your response in 繁體中文.",
+            ].join(" ");
           }
           return `Prefer replying in ${params.replyLanguage.trim()} when the user's language is unclear.`;
         })()

@@ -177,6 +177,8 @@ export const AgentDefaultsSchema = z
       .strict()
       .optional(),
     sandbox: AgentSandboxSchema,
+    /** Prefer replying in this language (e.g. zh-Hans, zh-CN); injected into system prompt. */
+    replyLanguage: z.string().optional(),
   })
   .strict()
   .optional();

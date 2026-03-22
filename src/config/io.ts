@@ -1396,4 +1396,6 @@ export async function writeConfigFile(
     envSnapshotForRestore: sameConfigPath ? options.envSnapshotForRestore : undefined,
     unsetPaths: options.unsetPaths,
   });
+  // So the next loadConfig() reads from disk and picks up the new values (e.g. agents.defaults.replyLanguage).
+  clearRuntimeConfigSnapshot();
 }

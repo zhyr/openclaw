@@ -6,6 +6,7 @@ set -e
 cd "$(dirname "$0")"
 
 echo "==> 1. 安装依赖（若无 node_modules 或需更新）"
+bash scripts/setup-libsignal.sh
 if ! [ -d node_modules ]; then
   pnpm install --no-optional || pnpm install
 else
@@ -27,15 +28,26 @@ export OLLAMA_API_KEY="${OLLAMA_API_KEY:-ollama-local}"
 export OPENCLAW_PROFILE=dev
 export OPENCLAW_GATEWAY_PORT=19001
 
+# Brave Search API key for web_search tool（.env 已 gitignore，可安全存放 key）
+[ -f .env ] && set -a && source .env && set +a
+export BRAVE_API_KEY="${BRAVE_API_KEY:-}"
+
+# 将 key 写入默认 + dev 配置，确保无论用哪个 Gateway（本脚本或 Mac 应用）都能读到
+if [ -n "$BRAVE_API_KEY" ]; then
+  pnpm openclaw config set tools.web.search.apiKey "$BRAVE_API_KEY" || true
+  pnpm openclaw --profile dev config set tools.web.search.apiKey "$BRAVE_API_KEY" || true
+fi
+
 # 将系统时区仅传入 Gateway 进程，使日志时间为本地时间（不修改系统或当前 shell）
 GATEWAY_TZ=""
 if [ -L /etc/localtime ]; then
   GATEWAY_TZ=$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')
 fi
+# 显式把 BRAVE_API_KEY 传给子进程，避免被 pnpm 或 node 子进程丢掉
 if [ -n "$GATEWAY_TZ" ]; then
-  env TZ="$GATEWAY_TZ" pnpm gateway:dev &
+  env TZ="$GATEWAY_TZ" BRAVE_API_KEY="${BRAVE_API_KEY}" pnpm gateway:dev &
 else
-  pnpm gateway:dev &
+  env BRAVE_API_KEY="${BRAVE_API_KEY}" pnpm gateway:dev &
 fi
 GATEWAY_PID=$!
 

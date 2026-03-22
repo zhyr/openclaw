@@ -318,6 +318,25 @@ async function ensureGitRepo(dir: string, isBrandNewWorkspace: boolean) {
   }
 }
 
+/**
+ * Ensures optional workspace files exist so agent reads (HEARTBEAT.md, memory/) do not fail with ENOENT.
+ * Call when a run uses this workspaceDir and onboarding may not have run.
+ */
+export async function ensureOptionalWorkspaceFiles(workspaceDir: string): Promise<void> {
+  const dir = resolveUserPath(workspaceDir);
+  await fs.mkdir(dir, { recursive: true });
+  const heartbeatPath = path.join(dir, DEFAULT_HEARTBEAT_FILENAME);
+  if (!(await fileExists(heartbeatPath))) {
+    try {
+      const template = await loadTemplate(DEFAULT_HEARTBEAT_FILENAME);
+      await writeFileIfMissing(heartbeatPath, template);
+    } catch {
+      // Template may be missing in dev; ignore so run can continue.
+    }
+  }
+  await fs.mkdir(path.join(dir, "memory"), { recursive: true });
+}
+
 export async function ensureAgentWorkspace(params?: {
   dir?: string;
   ensureBootstrapFiles?: boolean;

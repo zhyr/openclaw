@@ -106,6 +106,13 @@ describe("web_search brave language param normalization", () => {
     });
   });
 
+  it("maps zh to zh-hans for Brave API (Brave rejects bare zh)", () => {
+    expect(normalizeBraveLanguageParams({ search_lang: "zh" })).toEqual({
+      search_lang: "zh-hans",
+      ui_lang: undefined,
+    });
+  });
+
   it("flags invalid Brave language formats", () => {
     expect(normalizeBraveLanguageParams({ search_lang: "en-US" })).toEqual({
       invalidField: "search_lang",

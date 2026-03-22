@@ -510,9 +510,8 @@ describe("buildAgentSystemPrompt", () => {
       workspaceDir: "/tmp/openclaw",
       replyLanguage: "zh-Hans",
     });
-    expect(prompt).toContain(
-      "Always reply in 简体中文 unless the user writes in another language.",
-    );
+    expect(prompt).toContain("Reply in 简体中文 by default");
+    expect(prompt).toContain("otherwise keep your response in 简体中文");
   });
 
   it("injects reply language instruction when replyLanguage is zh-CN", () => {
@@ -520,14 +519,13 @@ describe("buildAgentSystemPrompt", () => {
       workspaceDir: "/tmp/openclaw",
       replyLanguage: "zh-CN",
     });
-    expect(prompt).toContain(
-      "Always reply in 简体中文 unless the user writes in another language.",
-    );
+    expect(prompt).toContain("Reply in 简体中文 by default");
+    expect(prompt).toContain("otherwise keep your response in 简体中文");
   });
 
   it("omits reply language when replyLanguage is not set", () => {
     const prompt = buildAgentSystemPrompt({ workspaceDir: "/tmp/openclaw" });
-    expect(prompt).not.toContain("Always reply in 简体中文");
+    expect(prompt).not.toContain("Reply in 简体中文 by default");
   });
 
   it("summarizes the message tool when available", () => {

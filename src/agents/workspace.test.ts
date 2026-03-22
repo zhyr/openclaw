@@ -6,12 +6,14 @@ import { makeTempWorkspace, writeWorkspaceFile } from "../test-helpers/workspace
 import {
   DEFAULT_AGENTS_FILENAME,
   DEFAULT_BOOTSTRAP_FILENAME,
+  DEFAULT_HEARTBEAT_FILENAME,
   DEFAULT_IDENTITY_FILENAME,
   DEFAULT_MEMORY_ALT_FILENAME,
   DEFAULT_MEMORY_FILENAME,
   DEFAULT_TOOLS_FILENAME,
   DEFAULT_USER_FILENAME,
   ensureAgentWorkspace,
+  ensureOptionalWorkspaceFiles,
   filterBootstrapFilesForSession,
   loadWorkspaceBootstrapFiles,
   resolveDefaultAgentWorkspaceDir,
@@ -30,6 +32,27 @@ describe("resolveDefaultAgentWorkspaceDir", () => {
 });
 
 const WORKSPACE_STATE_PATH_SEGMENTS = [".openclaw", "workspace-state.json"] as const;
+
+describe("ensureOptionalWorkspaceFiles", () => {
+  it("creates HEARTBEAT.md and memory/ when missing", async () => {
+    const tempDir = await makeTempWorkspace("openclaw-optional-");
+    await ensureOptionalWorkspaceFiles(tempDir);
+    await expect(
+      fs.access(path.join(tempDir, DEFAULT_HEARTBEAT_FILENAME)),
+    ).resolves.toBeUndefined();
+    const memStat = await fs.stat(path.join(tempDir, "memory"));
+    expect(memStat.isDirectory()).toBe(true);
+  });
+
+  it("does not overwrite existing HEARTBEAT.md", async () => {
+    const tempDir = await makeTempWorkspace("openclaw-optional-");
+    const heartbeatPath = path.join(tempDir, DEFAULT_HEARTBEAT_FILENAME);
+    await fs.writeFile(heartbeatPath, "# Custom\n", "utf-8");
+    await ensureOptionalWorkspaceFiles(tempDir);
+    const content = await fs.readFile(heartbeatPath, "utf-8");
+    expect(content).toBe("# Custom\n");
+  });
+});
 
 async function readOnboardingState(dir: string): Promise<{
   version: number;
