@@ -5,6 +5,18 @@
 set -e
 cd "$(dirname "$0")"
 
+# 检查当前 Node.js 版本是否符合要求 (>=22.12.0)
+if ! node -e "const [M, m] = process.versions.node.split('.').map(Number); process.exit((M > 22 || (M === 22 && m >= 12)) ? 0 : 1);" 2>/dev/null; then
+  echo "❌ 环境变量校验失败：本项目要求 Node.js >= 22.12.0"
+  echo "当前 Node.js 版本为: $(node -v)"
+  echo "请升级 Node 后再运行。推荐使用 nvm 安装最新 v22："
+  echo "   nvm install 22"
+  echo "   nvm use 22"
+  echo "   rm -rf node_modules  # 清理旧环境遗留"
+  echo "   ./start.sh"
+  exit 1
+fi
+
 echo "==> 1. 安装依赖（若无 node_modules 或需更新）"
 bash scripts/setup-libsignal.sh
 pnpm install
