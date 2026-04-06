@@ -245,6 +245,23 @@ export function resolveOllamaApiBase(configuredBaseUrl?: string): string {
   return trimmed.replace(/\/v1$/i, "");
 }
 
+export function resolveOllamaProviderBaseUrl(configuredBaseUrl?: string, api?: string): string {
+  const baseUrl =
+    configuredBaseUrl?.trim() || process.env.OLLAMA_HOST?.trim() || OLLAMA_API_BASE_URL;
+  const normalized = baseUrl.replace(/\/+$/, "");
+
+  // OpenAI-compatible Ollama endpoints should expose `/v1/chat/completions`.
+  // If user config supplies a non-/v1 URL, append /v1 automatically.
+  if (api === "openai-completions") {
+    if (/\/v1$/i.test(normalized)) {
+      return normalized;
+    }
+    return `${normalized}/v1`;
+  }
+
+  return resolveOllamaApiBase(normalized);
+}
+
 async function queryOllamaContextWindow(
   apiBase: string,
   modelName: string,
@@ -1055,9 +1072,13 @@ export async function resolveImplicitProviders(params: {
   const hasExplicitModels =
     Array.isArray(explicitOllama?.models) && explicitOllama.models.length > 0;
   if (hasExplicitModels && explicitOllama) {
+    const resolvedBaseUrl = resolveOllamaProviderBaseUrl(
+      explicitOllama.baseUrl,
+      explicitOllama.api,
+    );
     providers.ollama = {
       ...explicitOllama,
-      baseUrl: resolveOllamaApiBase(explicitOllama.baseUrl),
+      baseUrl: resolvedBaseUrl,
       api: explicitOllama.api ?? "ollama",
       apiKey: ollamaKey ?? explicitOllama.apiKey ?? "ollama-local",
     };
@@ -1070,8 +1091,15 @@ export async function resolveImplicitProviders(params: {
       quiet: !ollamaKey && !hasExplicitOllamaConfig,
     });
     if (ollamaProvider.models.length > 0 || ollamaKey || explicitOllama?.apiKey) {
+      const providerApi = explicitOllama?.api ?? ollamaProvider.api;
+      const providerBaseUrl = resolveOllamaProviderBaseUrl(
+        explicitOllama?.baseUrl ?? ollamaProvider.baseUrl,
+        providerApi,
+      );
       providers.ollama = {
         ...ollamaProvider,
+        baseUrl: providerBaseUrl,
+        api: providerApi,
         apiKey: ollamaKey ?? explicitOllama?.apiKey ?? "ollama-local",
       };
     }

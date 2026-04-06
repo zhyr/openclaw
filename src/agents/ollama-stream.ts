@@ -400,8 +400,9 @@ export async function* parseNdjsonStream(
 
 function resolveOllamaChatUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, "");
-  const normalizedBase = trimmed.replace(/\/v1$/i, "");
-  const apiBase = normalizedBase || OLLAMA_NATIVE_BASE_URL;
+  const withoutV1 = trimmed.replace(/\/v1$/i, "");
+  const withoutApi = withoutV1.replace(/\/api$/i, "");
+  const apiBase = withoutApi || OLLAMA_NATIVE_BASE_URL;
   return `${apiBase}/api/chat`;
 }
 

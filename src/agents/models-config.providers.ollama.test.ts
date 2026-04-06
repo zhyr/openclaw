@@ -43,9 +43,17 @@ describe("resolveOllamaApiBase", () => {
 describe("Ollama provider", () => {
   it("should not include ollama when no API key is configured", async () => {
     const agentDir = mkdtempSync(join(tmpdir(), "openclaw-test-"));
-    const providers = await resolveImplicitProviders({ agentDir });
+    const savedKey = process.env.OLLAMA_API_KEY;
+    delete process.env.OLLAMA_API_KEY;
 
-    expect(providers?.ollama).toBeUndefined();
+    try {
+      const providers = await resolveImplicitProviders({ agentDir });
+      expect(providers?.ollama).toBeUndefined();
+    } finally {
+      if (savedKey) {
+        process.env.OLLAMA_API_KEY = savedKey;
+      }
+    }
   });
 
   it("should use native ollama api type", async () => {
@@ -80,8 +88,29 @@ describe("Ollama provider", () => {
         },
       });
 
-      // Native API strips /v1 suffix via resolveOllamaApiBase()
-      expect(providers?.ollama?.baseUrl).toBe("http://192.168.20.14:11434");
+      expect(providers?.ollama?.baseUrl).toBe("http://192.168.20.14:11434/v1");
+    } finally {
+      delete process.env.OLLAMA_API_KEY;
+    }
+  });
+
+  it("appends /v1 for OpenAI-compatible Ollama provider URLs", async () => {
+    const agentDir = mkdtempSync(join(tmpdir(), "openclaw-test-"));
+    process.env.OLLAMA_API_KEY = "test-key";
+
+    try {
+      const providers = await resolveImplicitProviders({
+        agentDir,
+        explicitProviders: {
+          ollama: {
+            baseUrl: "http://127.0.0.1:11434",
+            api: "openai-completions",
+            models: [],
+          },
+        },
+      });
+
+      expect(providers?.ollama?.baseUrl).toBe("http://127.0.0.1:11434/v1");
     } finally {
       delete process.env.OLLAMA_API_KEY;
     }

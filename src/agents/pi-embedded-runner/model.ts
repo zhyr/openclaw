@@ -8,6 +8,7 @@ import { buildModelAliasLines } from "../model-alias-lines.js";
 import { normalizeModelCompat } from "../model-compat.js";
 import { resolveForwardCompatModel } from "../model-forward-compat.js";
 import { normalizeProviderId } from "../model-selection.js";
+import { resolveOllamaProviderBaseUrl } from "../models-config.providers.js";
 import { discoverAuthStorage, discoverModels } from "../pi-model-discovery.js";
 
 type InlineModelEntry = ModelDefinitionConfig & {
@@ -30,12 +31,15 @@ export function buildInlineProviderModels(
     if (!trimmed) {
       return [];
     }
-    return (entry?.models ?? []).map((model) => ({
-      ...model,
-      provider: trimmed,
-      baseUrl: entry?.baseUrl,
-      api: model.api ?? entry?.api,
-    }));
+    return (entry?.models ?? []).map((model) => {
+      const modelApi = model.api ?? entry?.api;
+      return {
+        ...model,
+        provider: trimmed,
+        baseUrl: resolveOllamaProviderBaseUrl(entry?.baseUrl, modelApi),
+        api: modelApi,
+      };
+    });
   });
 }
 
@@ -97,12 +101,13 @@ export function resolveModel(
     const providerCfg = providers[provider];
     if (providerCfg || modelId.startsWith("mock-")) {
       const configuredModel = providerCfg?.models?.find((candidate) => candidate.id === modelId);
+      const modelApi = providerCfg?.api ?? "openai-responses";
       const fallbackModel: Model<Api> = normalizeModelCompat({
         id: modelId,
         name: modelId,
-        api: providerCfg?.api ?? "openai-responses",
+        api: modelApi,
         provider,
-        baseUrl: providerCfg?.baseUrl,
+        baseUrl: resolveOllamaProviderBaseUrl(providerCfg?.baseUrl, modelApi),
         reasoning: configuredModel?.reasoning ?? false,
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

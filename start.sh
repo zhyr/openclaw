@@ -51,6 +51,21 @@ GATEWAY_TZ=""
 if [ -L /etc/localtime ]; then
   GATEWAY_TZ=$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')
 fi
+
+# 如果 19001 已被占用，尝试优雅清理（优先 openclaw gateway stop），再强杀遗留进程
+if command -v lsof >/dev/null 2>&1; then
+  OCCUPIER=$(lsof -tiTCP:19001 -sTCP:LISTEN || true)
+  if [ -n "$OCCUPIER" ]; then
+    echo "==> 发现已有进程占用 19001: PID=$OCCUPIER，尝试停止旧 Gateway..."
+    openclaw --profile dev gateway stop 2>/dev/null || true
+    sleep 1
+    if kill -0 "$OCCUPIER" 2>/dev/null; then
+      echo "==> 旧进程仍在，强制 kill -9 $OCCUPIER"
+      kill -9 "$OCCUPIER" 2>/dev/null || true
+    fi
+  fi
+fi
+
 # 显式把 BRAVE_API_KEY 传给子进程，避免被 pnpm 或 node 子进程丢掉
 if [ -n "$GATEWAY_TZ" ]; then
   env TZ="$GATEWAY_TZ" BRAVE_API_KEY="${BRAVE_API_KEY}" pnpm gateway:dev &

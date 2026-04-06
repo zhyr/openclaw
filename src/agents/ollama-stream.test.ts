@@ -361,6 +361,29 @@ describe("createOllamaStreamFn", () => {
     );
   });
 
+  it("normalizes /api baseUrl and maps maxTokens + signal", async () => {
+    await withMockNdjsonFetch(
+      [
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":"ok"},"done":false}',
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":1,"eval_count":1}',
+      ],
+      async (fetchMock) => {
+        const signal = new AbortController().signal;
+        const stream = await createOllamaTestStream({
+          baseUrl: "http://ollama-host:11434/api/",
+          options: { maxTokens: 123, signal },
+        });
+
+        const events = await collectStreamEvents(stream);
+        expect(events.at(-1)?.type).toBe("done");
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+        expect(url).toBe("http://ollama-host:11434/api/chat");
+      },
+    );
+  });
+
   it("accumulates reasoning chunks when content is empty", async () => {
     await withMockNdjsonFetch(
       [
