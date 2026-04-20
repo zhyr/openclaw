@@ -384,6 +384,30 @@ describe("createOllamaStreamFn", () => {
     );
   });
 
+  it("annotates Ollama network failures with the chat URL", async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async () => {
+      throw new Error("Connection error.");
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    try {
+      const stream = await createOllamaTestStream({ baseUrl: "http://127.0.0.1:11434" });
+      const events = await collectStreamEvents(stream);
+      const errorEvent = events.at(-1) as
+        | { type: string; error?: { errorMessage?: string } }
+        | undefined;
+
+      expect(errorEvent).toBeDefined();
+      expect(errorEvent?.type).toBe("error");
+      expect(errorEvent?.error?.errorMessage).toContain(
+        "Unable to reach Ollama at http://127.0.0.1:11434/api/chat: Connection error.",
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("accumulates reasoning chunks when content is empty", async () => {
     await withMockNdjsonFetch(
       [

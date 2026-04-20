@@ -198,6 +198,17 @@ const NVIDIA_DEFAULT_COST = {
   cacheWrite: 0,
 };
 
+// MLX local inference server (OpenAI-compatible)
+const MLX_NATIVE_BASE_URL = "http://127.0.0.1:8000";
+const MLX_DEFAULT_CONTEXT_WINDOW = 8192;
+const MLX_DEFAULT_MAX_TOKENS = 2048;
+const MLX_DEFAULT_COST = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+};
+
 const log = createSubsystemLogger("agents/model-providers");
 
 interface OllamaModel {
@@ -406,6 +417,74 @@ async function discoverVllmModels(
     log.warn(`Failed to discover vLLM models: ${String(error)}`);
     return [];
   }
+}
+
+async function discoverMlxModels(
+  baseUrl?: string,
+  opts?: { quiet?: boolean },
+): Promise<ModelDefinitionConfig[]> {
+  // Skip MLX discovery in test environments
+  if (process.env.VITEST || process.env.NODE_ENV === "test") {
+    return [];
+  }
+
+  const apiBase = (baseUrl?.trim() || MLX_NATIVE_BASE_URL).replace(/\/+$/, "");
+
+  try {
+    const response = await fetch(`${apiBase}/v1/models`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) {
+      if (!opts?.quiet) {
+        log.warn(`Failed to discover MLX models: ${response.status}`);
+      }
+      return [];
+    }
+    const data = (await response.json()) as {
+      data?: Array<{ id?: string; owned_by?: string }>;
+    };
+    const models = data.data ?? [];
+    if (models.length === 0) {
+      log.debug("No MLX models found on local instance");
+      return [];
+    }
+
+    return models
+      .map((m) => ({ id: typeof m.id === "string" ? m.id.trim() : "" }))
+      .filter((m) => Boolean(m.id))
+      .map((m) => {
+        const modelId = m.id;
+        const lower = modelId.toLowerCase();
+        const isReasoning = lower.includes("r1") || lower.includes("reasoning");
+        return {
+          id: modelId,
+          name: modelId,
+          reasoning: isReasoning,
+          input: ["text"],
+          cost: MLX_DEFAULT_COST,
+          contextWindow: MLX_DEFAULT_CONTEXT_WINDOW,
+          maxTokens: MLX_DEFAULT_MAX_TOKENS,
+        } satisfies ModelDefinitionConfig;
+      });
+  } catch (error) {
+    if (!opts?.quiet) {
+      log.warn(`Failed to discover MLX models: ${String(error)}`);
+    }
+    return [];
+  }
+}
+
+function buildMlxProvider(params?: {
+  baseUrl?: string;
+  models?: ModelDefinitionConfig[];
+}): ProviderConfig {
+  const baseUrl = params?.baseUrl?.trim() || MLX_NATIVE_BASE_URL;
+  const models = params?.models || [];
+  return {
+    baseUrl: `${baseUrl}/v1`,
+    api: "openai-completions",
+    models,
+  };
 }
 
 function normalizeApiKeyConfig(value: string): string {
@@ -1169,6 +1248,38 @@ export async function resolveImplicitProviders(params: {
     resolveApiKeyFromProfiles({ provider: "kilocode", store: authStore });
   if (kilocodeKey) {
     providers.kilocode = { ...buildKilocodeProvider(), apiKey: kilocodeKey };
+  }
+
+  // MLX provider - auto-discover if running locally, or add if explicitly configured.
+  // Use the user's configured baseUrl (from explicit providers) for model discovery.
+  // Skip discovery when explicit models are already defined.
+  const mlxKey =
+    resolveEnvApiKeyVarName("mlx") ??
+    resolveApiKeyFromProfiles({ provider: "mlx", store: authStore });
+  const explicitMlx = params.explicitProviders?.mlx;
+  const hasExplicitMlxModels = Array.isArray(explicitMlx?.models) && explicitMlx.models.length > 0;
+  if (hasExplicitMlxModels && explicitMlx) {
+    providers.mlx = {
+      ...explicitMlx,
+      baseUrl: `${(explicitMlx.baseUrl?.trim() || MLX_NATIVE_BASE_URL).replace(/\/+$/, "")}/v1`,
+      api: "openai-completions",
+      apiKey: mlxKey ?? explicitMlx.apiKey ?? "mlx-local",
+    };
+  } else {
+    const mlxBaseUrl = explicitMlx?.baseUrl;
+    const hasExplicitMlxConfig = Boolean(explicitMlx);
+    const mlxProvider = buildMlxProvider({
+      baseUrl: mlxBaseUrl,
+      models: await discoverMlxModels(mlxBaseUrl, {
+        quiet: !mlxKey && !hasExplicitMlxConfig,
+      }),
+    });
+    if (mlxProvider.models.length > 0 || mlxKey || explicitMlx?.apiKey) {
+      providers.mlx = {
+        ...mlxProvider,
+        apiKey: mlxKey ?? explicitMlx?.apiKey ?? "mlx-local",
+      };
+    }
   }
 
   return providers;

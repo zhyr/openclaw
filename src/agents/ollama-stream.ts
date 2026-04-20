@@ -406,7 +406,38 @@ function resolveOllamaChatUrl(baseUrl: string): string {
   return `${apiBase}/api/chat`;
 }
 
-export function createOllamaStreamFn(baseUrl: string): StreamFn {
+export const MLX_NATIVE_BASE_URL = "http://127.0.0.1:8000";
+
+export function isMLXCompatBaseUrl(baseUrl?: string): boolean {
+  if (!baseUrl) {
+    return false;
+  }
+  try {
+    const url = new URL(baseUrl);
+    const hostname = url.hostname.toLowerCase();
+    const port = url.port || (url.protocol === "https:" ? "443" : "80");
+    return (
+      (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") &&
+      port === "8000"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function annotateOllamaFetchError(err: Error, chatUrl: string): string {
+  const rawMessage = err.message || String(err);
+  const connectionErrorPattern =
+    /\b(connection error|connection refused|connect .* refused|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNRESET|UND_ERR_CONNECT|UND_ERR_DNS_RESOLVE_FAILED|UND_ERR_SOCKET|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT|UND_ERR_RESPONSE_STATUS_CODE)\b/i;
+
+  if (connectionErrorPattern.test(rawMessage)) {
+    return `Unable to reach Ollama at ${chatUrl}: ${rawMessage}`;
+  }
+
+  return rawMessage;
+}
+
+export function createOllamaStreamFn(baseUrl: string, runTimeoutMs?: number): StreamFn {
   const chatUrl = resolveOllamaChatUrl(baseUrl);
 
   return (model, context, options) => {
@@ -447,11 +478,19 @@ export function createOllamaStreamFn(baseUrl: string): StreamFn {
           headers.Authorization = `Bearer ${options.apiKey}`;
         }
 
+        // Merge run-level timeout with user signal using AbortSignal.any()
+        // to ensure both timeout and user abort terminate the fetch
+        let signal = options?.signal;
+        if (runTimeoutMs && runTimeoutMs > 0) {
+          const timeoutSignal = AbortSignal.timeout(runTimeoutMs);
+          signal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+        }
+
         const response = await fetch(chatUrl, {
           method: "POST",
           headers,
           body: JSON.stringify(body),
-          signal: options?.signal,
+          signal,
         });
 
         if (!response.ok) {
@@ -512,7 +551,8 @@ export function createOllamaStreamFn(baseUrl: string): StreamFn {
           message: assistantMessage,
         });
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
+        const errorMessage =
+          err instanceof Error ? annotateOllamaFetchError(err, chatUrl) : String(err);
         stream.push({
           type: "error",
           reason: "error",

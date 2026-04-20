@@ -41,7 +41,11 @@ import { isTimeoutError } from "../../failover-error.js";
 import { resolveImageSanitizationLimits } from "../../image-sanitization.js";
 import { resolveModelAuthMode } from "../../model-auth.js";
 import { normalizeProviderId, resolveDefaultModelForAgent } from "../../model-selection.js";
-import { createOllamaStreamFn, OLLAMA_NATIVE_BASE_URL } from "../../ollama-stream.js";
+import {
+  createOllamaStreamFn,
+  isMLXCompatBaseUrl,
+  OLLAMA_NATIVE_BASE_URL,
+} from "../../ollama-stream.js";
 import { createOpenAIWebSocketStreamFn, releaseWsSession } from "../../openai-ws-stream.js";
 import { resolveOwnerDisplaySetting } from "../../owner-display.js";
 import {
@@ -83,11 +87,7 @@ import { isRunnerAbortError } from "../abort.js";
 import { appendCacheTtlTimestamp, isCacheTtlEligibleProvider } from "../cache-ttl.js";
 import { buildEmbeddedExtensionFactories } from "../extensions.js";
 import { applyExtraParamsToAgent } from "../extra-params.js";
-import {
-  logToolSchemasForGoogle,
-  sanitizeSessionHistory,
-  sanitizeToolsForGoogle,
-} from "../google.js";
+import { logToolSchemasForGoogle, sanitizeSessionHistory } from "../google.js";
 import { getDmHistoryLimitFromSessionKey, limitHistoryTurns } from "../history.js";
 import { log } from "../logger.js";
 import { buildModelAliasLines } from "../model.js";
@@ -129,6 +129,48 @@ type PromptBuildHookRunner = {
     ctx: PluginHookAgentContext,
   ) => Promise<PluginHookBeforeAgentStartResult | undefined>;
 };
+
+export function isOllamaCompatProvider(model: {
+  provider?: string;
+  baseUrl?: string;
+  api?: string;
+}): boolean {
+  const providerId = normalizeProviderId(model.provider ?? "");
+  if (providerId === "ollama") {
+    return true;
+  }
+  if (!model.baseUrl) {
+    return false;
+  }
+  try {
+    const parsed = new URL(model.baseUrl);
+    const hostname = parsed.hostname.toLowerCase();
+    const isLocalhost =
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname === "[::1]";
+    if (isLocalhost && parsed.port === "11434") {
+      return true;
+    }
+
+    // Allow remote/LAN Ollama OpenAI-compatible endpoints when the provider id
+    // itself indicates Ollama usage (e.g. "my-ollama").
+    const providerHintsOllama = providerId.includes("ollama");
+    const isOllamaPort = parsed.port === "11434";
+    const isOllamaCompatPath = parsed.pathname === "/" || /^\/v1\/?$/i.test(parsed.pathname);
+    return providerHintsOllama && isOllamaPort && isOllamaCompatPath;
+  } catch {
+    return false;
+  }
+}
+
+function applyLocalModelLeanFilter(tools: Tool[]): Tool[] {
+  // Strip browser, cron, message tools from local models (Ollama, MLX) to reduce token overhead.
+  // These tools are typically not useful for local inference and consume context.
+  const blacklist = new Set(["browser_open", "cron_add", "message_send_to_user"]);
+  return tools.filter((tool) => !blacklist.has(tool.name));
+}
 
 export function isOllamaCompatProvider(model: {
   provider?: string;
@@ -604,7 +646,10 @@ export async function runEmbeddedAttempt(
             params.requireExplicitMessageTarget ?? isSubagentSessionKey(params.sessionKey),
           disableMessageTool: params.disableMessageTool,
         });
-    const tools = sanitizeToolsForGoogle({ tools: toolsRaw, provider: params.provider });
+
+    // Apply local model lean filter: strip browser/cron/message tools from Ollama/MLX to reduce token overhead
+    const isLocalModel = params.model.api === "ollama" || isMLXCompatBaseUrl(params.model.baseUrl);
+    const tools = isLocalModel ? applyLocalModelLeanFilter(toolsRaw) : toolsRaw;
     const allowedToolNames = collectAllowedToolNames({
       tools,
       clientTools: params.clientTools,
@@ -930,7 +975,23 @@ export async function runEmbeddedAttempt(
           modelBaseUrl,
           providerBaseUrl,
         });
-        activeSession.agent.streamFn = createOllamaStreamFn(ollamaBaseUrl);
+        // Pass run-level timeout to fetch so undici doesn't truncate at 300s default
+        activeSession.agent.streamFn = createOllamaStreamFn(ollamaBaseUrl, params.timeoutMs);
+      } else if (
+        params.model.api === "openai-completions" &&
+        isMLXCompatBaseUrl(params.model.baseUrl)
+      ) {
+        // MLX openai-completions with timeout wrapper (similar to Ollama)
+        const inner = streamSimple;
+        activeSession.agent.streamFn = (model, context, options) => {
+          // Merge run-level timeout with user signal
+          let signal = options?.signal;
+          if (params.timeoutMs && params.timeoutMs > 0) {
+            const timeoutSignal = AbortSignal.timeout(params.timeoutMs);
+            signal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+          }
+          return inner(model, context, { ...options, signal });
+        };
       } else if (params.model.api === "openai-responses" && params.provider === "openai") {
         const wsApiKey = await params.authStorage.getApiKey(params.provider);
         if (wsApiKey) {
