@@ -209,6 +209,56 @@ const MLX_DEFAULT_COST = {
   cacheWrite: 0,
 };
 
+// Yueli KGM Computing (阅粒知识计算引擎) - OpenAI-compatible with KGM middleware
+export const YUELI_KGM_BASE_URL = "http://127.0.0.1:3000/v1";
+const YUELI_KGM_DEFAULT_CONTEXT_WINDOW = 128000;
+const YUELI_KGM_DEFAULT_MAX_TOKENS = 8192;
+const YUELI_KGM_DEFAULT_COST = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+};
+
+// Supported Yueli KGM models (can be discovered from /v1/models or configured manually)
+const YUELI_KGM_MODEL_CATALOG: Array<{
+  id: string;
+  name: string;
+  reasoning: boolean;
+}> = [
+  // Qwen series
+  { id: "qwen3.5-7b", name: "Qwen 3.5 7B", reasoning: false },
+  { id: "qwen3.5-14b", name: "Qwen 3.5 14B", reasoning: false },
+  { id: "qwen3.5-32b", name: "Qwen 3.5 32B", reasoning: false },
+  { id: "qwen3.6-72b", name: "Qwen 3.6 72B", reasoning: false },
+  // GLM series
+  { id: "glm-5.0-9b", name: "GLM 5.0 9B", reasoning: false },
+  { id: "glm-5.0-32b", name: "GLM 5.0 32B", reasoning: false },
+  { id: "glm-5.1-9b", name: "GLM 5.1 9B", reasoning: false },
+  { id: "glm-5.1-32b", name: "GLM 5.1 32B", reasoning: true },
+  // Gemma series
+  { id: "gemma-4-2b", name: "Gemma 4 2B", reasoning: false },
+  { id: "gemma-4-4b", name: "Gemma 4 4B", reasoning: false },
+  { id: "gemma-4-9b", name: "Gemma 4 9B", reasoning: false },
+  { id: "gemma-4-27b", name: "Gemma 4 27B", reasoning: false },
+  // MiniMax series
+  { id: "minimax-2.5-4b", name: "MiniMax 2.5 4B", reasoning: false },
+  { id: "minimax-2.5-8b", name: "MiniMax 2.5 8B", reasoning: false },
+  { id: "minimax-2.5-32b", name: "MiniMax 2.5 32B", reasoning: false },
+  { id: "minimax-2.5-456b", name: "MiniMax 2.5 456B", reasoning: true },
+  { id: "minimax-2.7-32b", name: "MiniMax 2.7 32B", reasoning: true },
+  // MiMo series
+  { id: "mimo-2.5-1.5b", name: "MiMo 2.5 1.5B", reasoning: false },
+  { id: "mimo-2.5-7b", name: "MiMo 2.5 7B", reasoning: false },
+  { id: "mimo-2.5-13b", name: "MiMo 2.5 13B", reasoning: false },
+  { id: "mimo-2.5-30b", name: "MiMo 2.5 30B", reasoning: false },
+  // vMLX (Apple Silicon)
+  { id: "vmlx-m1", name: "vMLX M1", reasoning: false },
+  { id: "vmlx-m2", name: "vMLX M2", reasoning: false },
+  { id: "vmlx-m3", name: "vMLX M3", reasoning: false },
+  { id: "vmlx-m4", name: "vMLX M4", reasoning: false },
+];
+
 const log = createSubsystemLogger("agents/model-providers");
 
 interface OllamaModel {
@@ -485,6 +535,114 @@ function buildMlxProvider(params?: {
     api: "openai-completions",
     models,
   };
+}
+
+// ── Yueli KGM Computing ───────────────────────────────────────────────────────
+
+interface YueliKgmModelsResponse {
+  data?: Array<{
+    id?: string;
+    owned_by?: string;
+  }>;
+}
+
+async function discoverYueliKgmModels(
+  baseUrl?: string,
+  opts?: { quiet?: boolean },
+): Promise<ModelDefinitionConfig[]> {
+  // Skip Yueli KGM discovery in test environments
+  if (process.env.VITEST || process.env.NODE_ENV === "test") {
+    return [];
+  }
+
+  const apiBase = (baseUrl?.trim() || YUELI_KGM_BASE_URL).replace(/\/+$/, "");
+
+  try {
+    // Try OpenAI-compatible /v1/models endpoint first
+    const response = await fetch(`${apiBase}/models`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) {
+      if (!opts?.quiet) {
+        log.warn(`Failed to discover Yueli KGM models: ${response.status}`);
+      }
+      return [];
+    }
+    const data = (await response.json()) as YueliKgmModelsResponse;
+    const models = data.data ?? [];
+    if (models.length === 0) {
+      log.debug("No Yueli KGM models found on local instance");
+      return [];
+    }
+
+    return models
+      .map((m) => ({ id: typeof m.id === "string" ? m.id.trim() : "" }))
+      .filter((m) => Boolean(m.id))
+      .map((m) => {
+        const modelId = m.id;
+        const lower = modelId.toLowerCase();
+        const isReasoning =
+          lower.includes("r1") ||
+          lower.includes("reasoning") ||
+          lower.includes("glm-5.1") ||
+          lower.includes("minimax-2.5-456b") ||
+          lower.includes("minimax-2.7");
+        return {
+          id: modelId,
+          name: modelId,
+          reasoning: isReasoning,
+          input: ["text"] as const,
+          cost: YUELI_KGM_DEFAULT_COST,
+          contextWindow: YUELI_KGM_DEFAULT_CONTEXT_WINDOW,
+          maxTokens: YUELI_KGM_DEFAULT_MAX_TOKENS,
+        } satisfies ModelDefinitionConfig;
+      });
+  } catch (error) {
+    if (!opts?.quiet) {
+      log.warn(`Failed to discover Yueli KGM models: ${String(error)}`);
+    }
+    return [];
+  }
+}
+
+export function buildYueliKgmProvider(params?: {
+  baseUrl?: string;
+  models?: ModelDefinitionConfig[];
+}): ProviderConfig {
+  const baseUrl = params?.baseUrl?.trim() || YUELI_KGM_BASE_URL;
+  const models =
+    params?.models ||
+    YUELI_KGM_MODEL_CATALOG.map((m) => ({
+      id: m.id,
+      name: m.name,
+      reasoning: m.reasoning,
+      input: ["text"] as const,
+      cost: YUELI_KGM_DEFAULT_COST,
+      contextWindow: YUELI_KGM_DEFAULT_CONTEXT_WINDOW,
+      maxTokens: YUELI_KGM_DEFAULT_MAX_TOKENS,
+    }));
+  return {
+    baseUrl: baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`,
+    api: "openai-completions",
+    models,
+  };
+}
+
+export function isYueliKgmCompatBaseUrl(baseUrl?: string): boolean {
+  if (!baseUrl) {
+    return false;
+  }
+  try {
+    const url = new URL(baseUrl);
+    const hostname = url.hostname.toLowerCase();
+    const port = url.port || (url.protocol === "https:" ? "443" : "80");
+    return (
+      (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") &&
+      (port === "3000" || port === "8080")
+    );
+  } catch {
+    return false;
+  }
 }
 
 function normalizeApiKeyConfig(value: string): string {
@@ -1278,6 +1436,38 @@ export async function resolveImplicitProviders(params: {
       providers.mlx = {
         ...mlxProvider,
         apiKey: mlxKey ?? explicitMlx?.apiKey ?? "mlx-local",
+      };
+    }
+  }
+
+  // Yueli KGM provider - auto-discover if running locally, or add if explicitly configured.
+  // Yueli KGM is a knowledge graph & model runtime with OpenAI-compatible API.
+  const yueliKgmKey =
+    resolveEnvApiKeyVarName("yueli-kgm") ??
+    resolveApiKeyFromProfiles({ provider: "yueli-kgm", store: authStore });
+  const explicitYueliKgm = params.explicitProviders?.["yueli-kgm"];
+  const hasExplicitYueliKgmModels =
+    Array.isArray(explicitYueliKgm?.models) && explicitYueliKgm.models.length > 0;
+  if (hasExplicitYueliKgmModels && explicitYueliKgm) {
+    providers["yueli-kgm"] = {
+      ...explicitYueliKgm,
+      baseUrl: `${(explicitYueliKgm.baseUrl?.trim() || YUELI_KGM_BASE_URL).replace(/\/+$/, "")}/v1`,
+      api: "openai-completions",
+      apiKey: yueliKgmKey ?? explicitYueliKgm.apiKey ?? "yueli-kgm-local",
+    };
+  } else {
+    const yueliKgmBaseUrl = explicitYueliKgm?.baseUrl;
+    const hasExplicitYueliKgmConfig = Boolean(explicitYueliKgm);
+    const yueliKgmProvider = buildYueliKgmProvider({
+      baseUrl: yueliKgmBaseUrl,
+      models: await discoverYueliKgmModels(yueliKgmBaseUrl, {
+        quiet: !yueliKgmKey && !hasExplicitYueliKgmConfig,
+      }),
+    });
+    if (yueliKgmProvider.models.length > 0 || yueliKgmKey || explicitYueliKgm?.apiKey) {
+      providers["yueli-kgm"] = {
+        ...yueliKgmProvider,
+        apiKey: yueliKgmKey ?? explicitYueliKgm?.apiKey ?? "yueli-kgm-local",
       };
     }
   }

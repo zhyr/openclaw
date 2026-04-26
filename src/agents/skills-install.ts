@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { OpenClawConfig } from "../config/config.js";
 import { resolveBrewExecutable } from "../infra/brew.js";
@@ -109,6 +110,39 @@ function buildNodeInstallCommand(packageName: string, prefs: SkillsInstallPrefer
     default:
       return ["npm", "install", "-g", "--ignore-scripts", packageName];
   }
+}
+
+// Security hardening: handle root vs non-root install paths correctly
+function resolveDefaultNodeInstallStateDir({
+  cwd = process.cwd(),
+  getuid = process.getuid?.bind(process),
+  homedir = os.homedir,
+  platform = process.platform,
+}: {
+  cwd?: string;
+  getuid?: () => number;
+  homedir?: () => string;
+  platform?: NodeJS.Platform;
+} = {}): string {
+  if (platform !== "win32" && getuid?.() === 0) {
+    return path.join(path.parse(cwd).root, "var", "lib", "openclaw");
+  }
+  return path.join(homedir(), ".openclaw");
+}
+
+// Security hardening: isolate npm installs to prevent cross-contamination
+async function buildNodeInstallEnv(prefs: SkillsInstallPreferences): Promise<NodeJS.ProcessEnv> {
+  if (prefs.nodeManager !== "npm") {
+    return {};
+  }
+
+  const stateDir = resolveDefaultNodeInstallStateDir();
+  const prefix = path.join(stateDir, "tools", "node", "npm");
+  await fs.promises.mkdir(prefix, { recursive: true, mode: 0o700 });
+  return {
+    NPM_CONFIG_PREFIX: prefix,
+    npm_config_prefix: prefix,
+  };
 }
 
 function buildInstallCommand(
@@ -464,6 +498,12 @@ export async function installSkill(params: SkillInstallRequest): Promise<SkillIn
     if (brewBin) {
       env = { GOBIN: brewBin };
     }
+  }
+
+  // Security hardening: isolate npm installs to prevent cross-contamination
+  if (spec.kind === "node") {
+    const nodeEnv = await buildNodeInstallEnv(prefs);
+    env = { ...env, ...nodeEnv };
   }
 
   return withWarnings(await executeInstallCommand({ argv, timeoutMs, env }), warnings);

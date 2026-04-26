@@ -531,7 +531,7 @@ export class DiscordExecApprovalHandler {
       const approvers = this.opts.config.approvers ?? [];
 
       for (const approver of approvers) {
-        const userId = String(approver);
+        const userId = approver;
         try {
           // Create DM channel
           const dmChannel = (await discordRequest(
@@ -707,10 +707,13 @@ export class DiscordExecApprovalHandler {
     }
   }
 
-  async resolveApproval(approvalId: string, decision: ExecApprovalDecision): Promise<boolean> {
+  async resolveApproval(
+    approvalId: string,
+    decision: ExecApprovalDecision,
+  ): Promise<{ ok: true } | { ok: false; reason: "error" | "not-found" }> {
     if (!this.gatewayClient) {
       logError("discord exec approvals: gateway client not connected");
-      return false;
+      return { ok: false, reason: "error" };
     }
 
     logDebug(`discord exec approvals: resolving ${approvalId} with ${decision}`);
@@ -721,10 +724,13 @@ export class DiscordExecApprovalHandler {
         decision,
       });
       logDebug(`discord exec approvals: resolved ${approvalId} successfully`);
-      return true;
+      return { ok: true };
     } catch (err) {
       logError(`discord exec approvals: resolve failed: ${String(err)}`);
-      return false;
+      return {
+        ok: false,
+        reason: isStructuredApprovalNotFoundError(err) ? "not-found" : "error",
+      };
     }
   }
 
@@ -737,6 +743,22 @@ export class DiscordExecApprovalHandler {
 export type ExecApprovalButtonContext = {
   handler: DiscordExecApprovalHandler;
 };
+
+function isStructuredApprovalNotFoundError(err: unknown): boolean {
+  if (!err || typeof err !== "object") {
+    return false;
+  }
+  const record = err as {
+    gatewayCode?: unknown;
+    details?: { reason?: unknown } | null;
+  };
+  if (record.gatewayCode === "APPROVAL_NOT_FOUND") {
+    return true;
+  }
+  return (
+    record.gatewayCode === "INVALID_REQUEST" && record.details?.reason === "APPROVAL_NOT_FOUND"
+  );
+}
 
 export class ExecApprovalButton extends Button {
   label = "execapproval";
@@ -766,7 +788,7 @@ export class ExecApprovalButton extends Button {
     // Verify the user is an authorized approver
     const approvers = this.ctx.handler.getApprovers();
     const userId = interaction.userId;
-    if (!approvers.some((id) => String(id) === userId)) {
+    if (!approvers.includes(userId)) {
       try {
         await interaction.reply({
           content: "⛔ You are not authorized to approve exec requests.",
@@ -795,9 +817,9 @@ export class ExecApprovalButton extends Button {
       // Interaction may have expired, try to continue anyway
     }
 
-    const ok = await this.ctx.handler.resolveApproval(parsed.approvalId, parsed.action);
+    const result = await this.ctx.handler.resolveApproval(parsed.approvalId, parsed.action);
 
-    if (!ok) {
+    if (!result.ok && result.reason !== "not-found") {
       try {
         await interaction.followUp({
           content:
