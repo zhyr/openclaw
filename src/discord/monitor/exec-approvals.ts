@@ -788,7 +788,7 @@ export class ExecApprovalButton extends Button {
     // Verify the user is an authorized approver
     const approvers = this.ctx.handler.getApprovers();
     const userId = interaction.userId;
-    if (!approvers.includes(userId)) {
+    if (!userId || !approvers.includes(userId)) {
       try {
         await interaction.reply({
           content: "⛔ You are not authorized to approve exec requests.",

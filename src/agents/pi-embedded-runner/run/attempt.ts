@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import os from "node:os";
-import type { AgentMessage, StreamFn } from "@mariozechner/pi-agent-core";
+import type { AgentMessage, AgentTool, StreamFn } from "@mariozechner/pi-agent-core";
 import { streamSimple } from "@mariozechner/pi-ai";
 import {
   createAgentSession,
@@ -165,46 +165,11 @@ export function isOllamaCompatProvider(model: {
   }
 }
 
-function applyLocalModelLeanFilter(tools: Tool[]): Tool[] {
+function applyLocalModelLeanFilter(tools: AgentTool[]): AgentTool[] {
   // Strip browser, cron, message tools from local models (Ollama, MLX) to reduce token overhead.
   // These tools are typically not useful for local inference and consume context.
   const blacklist = new Set(["browser_open", "cron_add", "message_send_to_user"]);
   return tools.filter((tool) => !blacklist.has(tool.name));
-}
-
-export function isOllamaCompatProvider(model: {
-  provider?: string;
-  baseUrl?: string;
-  api?: string;
-}): boolean {
-  const providerId = normalizeProviderId(model.provider ?? "");
-  if (providerId === "ollama") {
-    return true;
-  }
-  if (!model.baseUrl) {
-    return false;
-  }
-  try {
-    const parsed = new URL(model.baseUrl);
-    const hostname = parsed.hostname.toLowerCase();
-    const isLocalhost =
-      hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      hostname === "::1" ||
-      hostname === "[::1]";
-    if (isLocalhost && parsed.port === "11434") {
-      return true;
-    }
-
-    // Allow remote/LAN Ollama OpenAI-compatible endpoints when the provider id
-    // itself indicates Ollama usage (e.g. "my-ollama").
-    const providerHintsOllama = providerId.includes("ollama");
-    const isOllamaPort = parsed.port === "11434";
-    const isOllamaCompatPath = parsed.pathname === "/" || /^\/v1\/?$/i.test(parsed.pathname);
-    return providerHintsOllama && isOllamaPort && isOllamaCompatPath;
-  } catch {
-    return false;
-  }
 }
 
 export function resolveOllamaCompatNumCtxEnabled(params: {
@@ -674,9 +639,7 @@ export async function runEmbeddedAttempt(
         if (!runtimeCapabilities) {
           runtimeCapabilities = [];
         }
-        if (
-          !runtimeCapabilities.some((cap) => String(cap).trim().toLowerCase() === "inlinebuttons")
-        ) {
+        if (!runtimeCapabilities.some((cap) => cap.trim().toLowerCase() === "inlinebuttons")) {
           runtimeCapabilities.push("inlineButtons");
         }
       }
