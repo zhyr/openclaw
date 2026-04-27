@@ -713,7 +713,7 @@ export async function sendZaloTypingEvent(
   }
   const api = await ensureApi(profile);
   const type = options.isGroup ? ThreadType.Group : ThreadType.User;
-  await api.sendTypingEvent(trimmedThreadId, type);
+  // sendTypingEvent removed from zca-js API
 }
 
 export async function sendZaloLink(
@@ -1002,7 +1002,7 @@ export async function startZaloListener(params: {
   }
 
   const api = await ensureApi(profile);
-  const ownUserId = toNumberId(api.getOwnId());
+  const ownUserId = toNumberId(params.accountId); // Use params.accountId instead of removed api.getOwnId()
   let stopped = false;
 
   const cleanup = () => {
