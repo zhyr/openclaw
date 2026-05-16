@@ -8,7 +8,7 @@
     "@canghe/openclaw-wechat": "0.1.0"
   },
   "devDependencies": {
-    "openclaw": "workspace:*"
+    "openclaw": "*"
   },
   "openclaw": {
     "extensions": ["./index.ts"],
